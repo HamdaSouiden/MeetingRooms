@@ -1,12 +1,12 @@
 const mongoose = require("mongoose");
 
 const reservationSchema = new mongoose.Schema({
-    dateDebut: {
+    dateStart: {
         type: Date,
         required: true
     },
 
-    dateFin: {
+    dateEnd: {
         type: Date,
         required: true
     },
@@ -16,9 +16,13 @@ const reservationSchema = new mongoose.Schema({
         ref:"users"
     },
 
-    salle: {
+    meetingRoom: {
         type: mongoose.Schema.Types.ObjectId,
         ref:"reunion"
+    },
+    confirmed: {
+        type: Boolean,
+        default: false
     }
 })
 
