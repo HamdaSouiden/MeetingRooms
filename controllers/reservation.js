@@ -129,9 +129,9 @@ exports.createReservation = async (req, res) => {
         await newReservation.save();
 
         // Generate token and send confirmation email
-        const token = jwtUtils.generateTokenForReservation(newReservation);
-        const mailOptions = mailService.generateConfirmationEmail(req.user, token);
-        await mailService.sendEmail(mailOptions);
+        const token = jwtUtils.generateTokenReservation(newReservation);
+        const mailOptions = mailService.confirmationReservation(req.user, token);
+        await mailService.nodeMailer(mailOptions);
 
         res.status(201).json({
             message: "Reservation created and confirmation email sent",
