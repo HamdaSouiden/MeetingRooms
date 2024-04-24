@@ -11,7 +11,7 @@ const reservationSchema = new mongoose.Schema({
         required: true
     },
 
-    resever: {
+    reserver: {
         type: mongoose.Schema.Types.ObjectId,
         ref:"users"
     },
