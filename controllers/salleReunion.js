@@ -37,8 +37,8 @@ exports.getRoomById = async(req, res)=>{
 //Creation Meeting Rooms
 exports.createRoom = async (req, res)=>{
     try{
-        const {nom, capacite} = req.body;
-        const newRoom = new salleReunion({nom, capacite});
+        const {roomName, capacite} = req.body;
+        const newRoom = new salleReunion({nom:roomName, capacite});
         await newRoom.save();
 
         res.status(201).send("room created successfuly");
