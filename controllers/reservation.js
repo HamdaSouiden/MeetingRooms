@@ -2,67 +2,60 @@ const Reservation = require("../models/Reservation");
 const MeetingRoom = require("../models/salleReunion");
 const jwtUtils = require("../middleware/jwtUtils");
 const mailService = require("../service/sendMail");
-const User = require("../models/User");
 
-
+// Check for overlapping reservations
 async function isOverlapping(roomId, start, end, excludeId) {
     const query = {
         meetingRoom: roomId,
-        $or: [
-            { dateDebut: { $lte: start }, dateFin: { $gte: start } },
-            { dateDebut: { $lte: end }, dateFin: { $gte: end } },
-            { dateDebut: { $gte: start }, dateFin: { $lte: end } },
-            { dateDebut: { $lte: start }, dateFin: { $gte: end } }
+        $and: [
+            { _id: { $ne: excludeId } }, // Ensure we exclude the current reservation ID if provided
+            { $or: [
+                { dateStart: { $lte: end }, dateEnd: { $gte: start } }, // Overlaps part of the new reservation
+            ]}
         ]
     };
-    console.log("Overlap check query:", query);
     const overlappingReservation = await Reservation.findOne(query);
-    if (overlappingReservation) {
-        console.log("Overlap found:", overlappingReservation);
-    } else {
-        console.log("No overlap found.");
-    }
-    return overlappingReservation;
+    console.log("Overlap check for room", roomId, overlappingReservation ? "found overlap" : "no overlap");
+    return !!overlappingReservation;
 }
 
+// Validate the reservation times
 function validateReservationTimes(start, end) {
+    start = new Date(start);
+    end = new Date(end);
     const startHour = start.getHours() + (start.getMinutes() / 60);
     const endHour = end.getHours() + (end.getMinutes() / 60);
-    const minimumDurationHours = 1;
-    const allowedStartHour = 8; // 8:00 AM
-    const allowedEndHour = 23; // 11:00 PM
+    const minimumDuration = 1; // Minimum duration in hours
 
-    if (startHour < allowedStartHour || startHour > allowedEndHour || endHour > allowedEndHour) {
+    if (startHour < 8 || endHour > 23 || endHour < startHour) {
+        console.error("Invalid time: Reservation must be between 8:00 AM and 11:00 PM and start before it ends.");
         return false;
     }
 
-    return ((end - start) / (1000 * 60 * 60) >= minimumDurationHours);
+    const durationHours = (end - start) / (1000 * 60 * 60);
+    return durationHours >= minimumDuration;
 }
 
-// Get all reservations with optional filtering by meeting room and date range
+// Get all reservations with optional filtering
 exports.getAllReservations = async (req, res) => {
     try {
-        console.log(req.user);
-        let user = await User.findById(req.user._id);
-        console.log(user);
         const startAt = parseInt(req.query.startAt) || 0;
         const maxResults = parseInt(req.query.maxResults) || 10;
-        let query = { };
+        let query = {};
 
-        // Optional room ID filter
         if (!req.user.isAdmin) {
-            query.reserver = { $eq: req.user._id };
+            query.reserver = req.user._id;
+        }else{
+            query.confirmed = { $eq: true };
         }
         if (req.query.roomId) {
             query.meetingRoom = req.query.roomId;
         }
-
-        // Optional date range filters
         if (req.query.startDate) {
-            query.dateStart.$gte = new Date(req.query.startDate);
+            query.dateStart = { $gte: new Date(req.query.startDate) };
         }
         if (req.query.endDate) {
-            query.dateStart.$lte = new Date(req.query.endDate);
+            query.dateEnd = { $lte: new Date(req.query.endDate) };
         }
 
         const reservations = await Reservation.find(query)
@@ -74,7 +67,7 @@ exports.getAllReservations = async (req, res) => {
 
         if (!reservations.length) {
             return res.status(404).json({ message: "No reservations found" });
-        }    
+        }
 
         res.status(200).json(reservations);
     } catch (error) {
@@ -105,7 +98,6 @@ exports.createReservation = async (req, res) => {
         const startTime = new Date(dateStart);
         const endTime = new Date(dateEnd);
 
-        // Time boundaries and duration checks
         if (!validateReservationTimes(startTime, endTime)) {
             return res.status(400).json({ message: "Invalid reservation times or duration." });
         }
@@ -115,20 +107,18 @@ exports.createReservation = async (req, res) => {
             return res.status(404).json({ message: "Meeting room not found" });
         }
 
-        // Check for overlapping reservations
         if (await isOverlapping(roomId, startTime, endTime, null)) {
             return res.status(400).json({ message: "Meeting room is already booked for this time slot" });
         }
 
         const newReservation = new Reservation({
-            reserver: req.user,
+            reserver: req.user._id,
             meetingRoom: roomId,
-            dateDebut: startTime,
-            dateFin: endTime,
+            dateStart: startTime,
+            dateEnd: endTime,
         });
-        await newReservation.save();
 
-        // Generate token and send confirmation email
+        await newReservation.save();
         const token = jwtUtils.generateTokenReservation(newReservation);
         const mailOptions = mailService.confirmationReservation(req.user, token);
         await mailService.nodeMailer(mailOptions);
@@ -138,6 +128,7 @@ exports.createReservation = async (req, res) => {
             reservation: newReservation,
         });
     } catch (error) {
+        console.error("Error creating reservation:", error);
         res.status(400).json({ error: error.message });
     }
 };
@@ -157,15 +148,12 @@ exports.deleteReservation = async (req, res) => {
 
 // Update a reservation
 exports.updateReservation = async (req, res) => {
-    console.log("Update reservation request body:", req.body);
     try {
         const { id } = req.params;
         const { dateStart, dateEnd, roomId } = req.body;
-
         const startTime = new Date(dateStart);
         const endTime = new Date(dateEnd);
 
-        // Validate reservation times and duration
         if (!validateReservationTimes(startTime, endTime)) {
             return res.status(400).json({ message: "Invalid reservation times or duration." });
         }
@@ -176,21 +164,25 @@ exports.updateReservation = async (req, res) => {
 
         const updatedReservation = await Reservation.findByIdAndUpdate(id, {
             meetingRoom: roomId,
-            dateDebut: startTime,
-            dateFin: endTime,
-        }, { new: true }).populate("reserver", "username").populate("meetingRoom");
+            dateStart: startTime,
+            dateEnd: endTime,
+        }, { new: true })
+            .populate("reserver", "username")
+            .populate("meetingRoom");
 
         if (!updatedReservation) {
             return res.status(404).json({ message: "Reservation not found." });
         }
 
-        res.status(200).json({ message: "Reservation updated successfully.", reservation: updatedReservation });
+        res.status(200).json({
+            message: "Reservation updated successfully.",
+            reservation: updatedReservation
+        });
     } catch (error) {
         console.error("Update reservation error:", error);
         res.status(400).json({ error: error.message });
     }
 };
-
 
 // Confirm a reservation
 exports.confirmReservation = async (req, res) => {
@@ -212,11 +204,11 @@ exports.confirmReservation = async (req, res) => {
             return res.status(404).json({ message: "Reservation not found or already confirmed" });
         }
 
-        res.status(200).json({ message: "Reservation confirmed successfully", reservation: updatedReservation });
+        res.status(200).json({
+            message: "Reservation confirmed successfully",
+            reservation: updatedReservation
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 };
-
-
-
