@@ -18,7 +18,7 @@ exports.registre = async (req, res)=>{
         const newUser = new User({username, email, password, phone});
         await newUser.save();
 
-        const token = jwt.sign({_id: newUser._id,isAdmin: newUser.isAdmin}, process.env.JWT_SECRET);
+        const token = jwt.sign({_id: newUser._id,isAdmin: newUser.isAdmin, email: newUser.email, username: newUser.username}, process.env.JWT_SECRET);
         delete newUser.password;
         res.status(200).send({message:"User registed successfully",token:token,user:newUser});
 
@@ -42,7 +42,7 @@ exports.login = async (req, res)=>{
             return res.status(401).send("Invalid Password");
         }
 
-        const token = jwt.sign({_id: user._id,isAdmin: user.isAdmin}, process.env.JWT_SECRET);
+        const token = jwt.sign({_id: user._id,isAdmin: user.isAdmin, email: user.email, username: user.username}, process.env.JWT_SECRET);
 
         const{password,__v, ...others} = user._doc;
         res.status(200).send({token:token,user:others});
